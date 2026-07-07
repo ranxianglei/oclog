@@ -44,6 +44,43 @@ export function epochToStr(ms: number | null | undefined): string {
   return d.toISOString().replace("T", " ").replace(/\.\d+Z$/, "Z");
 }
 
+function msgTimeStr(info: MessageInfo): string {
+  const ms = info.time?.created;
+  if (!ms || typeof ms !== "number") return "";
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+    `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function messageSize(msg: RawMessage): number {
+  let total = 0;
+  const parts = msg.parts;
+  if (!parts) return 0;
+  for (const part of parts) {
+    if (part.type === "text" || part.type === "reasoning") {
+      total += Buffer.byteLength(part.text ?? "", "utf-8");
+    } else if (part.type === "tool") {
+      const input = part.state?.input ?? {};
+      total += Buffer.byteLength(JSON.stringify(input), "utf-8");
+      const output = part.state?.output;
+      if (typeof output === "string") {
+        total += Buffer.byteLength(output, "utf-8");
+      } else if (output != null) {
+        total += Buffer.byteLength(JSON.stringify(output), "utf-8");
+      }
+    }
+  }
+  return total;
+}
+
+function formatSize(n: number): string {
+  if (n < 1024) return `${n}B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)}MB`;
+}
+
 export function formatCost(cost: number | null | undefined): string {
   if (cost == null || typeof cost !== "number") return "$0.00";
   return `$${cost.toFixed(2)}`;
@@ -204,6 +241,44 @@ function renderEditDiff(
   return lines;
 }
 
+function buildMessageHeader(info: MessageInfo, msg: RawMessage): string {
+  const role = info.role ?? "unknown";
+
+  let header: string;
+  if (role === "user") {
+    header = "## 👤 User";
+  } else if (role === "assistant") {
+    const agent = info.agent ?? "";
+    const agentLabel = agent && agent !== "build" ? ` (${agent})` : "";
+    header = `## 🤖 Assistant${agentLabel}`;
+    const modelName = info.model?.modelID ?? info.modelID ?? "";
+    if (modelName) header += ` \`${modelName}\``;
+  } else {
+    header = `## 💬 ${role}`;
+  }
+
+  let suffix = "";
+
+  if (info.tokens) {
+    const tp: string[] = [];
+    if (info.tokens.input) tp.push(`in:${info.tokens.input}`);
+    if (info.tokens.output) tp.push(`out:${info.tokens.output}`);
+    if (info.tokens.reasoning) tp.push(`think:${info.tokens.reasoning}`);
+    if (tp.length > 0) suffix += ` [${tp.join(", ")}]`;
+  }
+
+  if (info.cost != null && info.cost > 0) {
+    suffix += ` ($${info.cost.toFixed(4)})`;
+  }
+
+  const ts = msgTimeStr(info);
+  if (ts) suffix += ` · ${ts}`;
+
+  suffix += ` · ${formatSize(messageSize(msg))}`;
+
+  return header + suffix;
+}
+
 export function renderMessageBlock(
   msg: RawMessage,
   opts: CliOptions = {},
@@ -214,12 +289,18 @@ export function renderMessageBlock(
   const parts = msg.parts;
   if (!parts || parts.length === 0) return lines;
 
+  lines.push(buildMessageHeader(info, msg));
+  lines.push("");
+
   if (role === "user") {
     for (const part of parts) {
       if (part.type === "text" && part.text) {
         lines.push(part.text);
       }
     }
+    lines.push("");
+    lines.push("---");
+    lines.push("");
     return lines;
   }
 
@@ -240,12 +321,17 @@ export function renderMessageBlock(
         lines.push("");
       }
     }
+    lines.push("---");
+    lines.push("");
     return lines;
   }
 
   for (const part of parts) {
     if (part.type === "text" && part.text) lines.push(part.text);
   }
+  lines.push("");
+  lines.push("---");
+  lines.push("");
   return lines;
 }
 

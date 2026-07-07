@@ -20,7 +20,7 @@ import {
 import { renderMessageBlock } from "./format.js";
 import type { CliOptions } from "./types.js";
 
-const VERSION = "0.1.2";
+const VERSION = "0.1.3";
 
 const HELP = `Usage: oclog [options] [session-id|keyword]
 
