@@ -1,4 +1,6 @@
 import chalk from "chalk";
+import { Marked } from "marked";
+import { markedTerminal } from "marked-terminal";
 import { spawn } from "node:child_process";
 
 import type { ExportPayload, RawMessage, SessionListItem } from "./types.js";
@@ -8,6 +10,32 @@ import {
   renderSessionHeader,
   renderSessionRow,
 } from "./format.js";
+
+let _renderer: Marked | null = null;
+
+function getRenderer(): Marked {
+  if (_renderer) return _renderer;
+  const m = new Marked();
+  m.use(
+    markedTerminal({
+      showSectionPrefix: false,
+      reflowText: true,
+      width: process.stdout.columns || 80,
+      tab: 2,
+    }),
+  );
+  _renderer = m;
+  return m;
+}
+
+function renderMarkdown(text: string): string {
+  try {
+    const result = getRenderer().parse(text);
+    return typeof result === "string" ? result : text;
+  } catch {
+    return text;
+  }
+}
 
 function isTTY(): boolean {
   return process.stdout.isTTY === true;
@@ -23,7 +51,7 @@ export function emit(text: string, opts: EmitOptions = {}): void {
     process.stdout.write(text + "\n");
     return;
   }
-  const rendered = isTTY() ? renderMd(text) : stripMd(text);
+  const rendered = renderMarkdown(text);
   if (opts.pager && isTTY()) {
     pipeToPager(rendered);
   } else {
@@ -41,85 +69,6 @@ function pipeToPager(text: string): void {
   } catch {
     process.stdout.write(text);
   }
-}
-
-function renderMd(md: string): string {
-  const lines = md.split("\n");
-  const out: string[] = [];
-  let inCode = false;
-  let codeLang = "";
-
-  for (const line of lines) {
-    if (line.startsWith("```")) {
-      if (!inCode) {
-        inCode = true;
-        codeLang = line.slice(3).trim();
-        out.push(chalk.dim("┌─" + (codeLang ? ` ${codeLang} ` : "")));
-      } else {
-        inCode = false;
-        codeLang = "";
-        out.push(chalk.dim("└─"));
-      }
-      continue;
-    }
-    if (inCode) {
-      out.push(chalk.cyan(line));
-      continue;
-    }
-
-    if (line.startsWith("# ")) {
-      out.push(chalk.bold.underline(line.slice(2)));
-    } else if (line.startsWith("## ")) {
-      out.push(chalk.bold(line.slice(3)));
-    } else if (line.startsWith("### ")) {
-      out.push(chalk.bold.cyan(line.slice(4)));
-    } else if (line.startsWith("> ")) {
-      out.push(chalk.dim("│ " + renderInline(line.slice(2))));
-    } else if (/^[-*] /.test(line)) {
-      out.push("  " + renderInline(line));
-    } else if (line.startsWith("- ")) {
-      out.push("  " + renderInline(line));
-    } else if (/^\d+\./.test(line)) {
-      out.push(renderInline(line));
-    } else {
-      out.push(renderInline(line));
-    }
-  }
-  return out.join("\n");
-}
-
-function renderInline(text: string): string {
-  let result = text;
-  result = result.replace(/`([^`]+)`/g, (_, code: string) => chalk.cyan(code));
-  result = result.replace(/\*\*([^*]+)\*\*/g, (_, t: string) => chalk.bold(t));
-  result = result.replace(/_([^_]+)_/g, (_, t: string) => chalk.italic(t));
-  return result;
-}
-
-function stripMd(md: string): string {
-  const lines = md.split("\n");
-  const out: string[] = [];
-  let inCode = false;
-  for (const line of lines) {
-    if (line.startsWith("```")) {
-      inCode = !inCode;
-      continue;
-    }
-    if (inCode) {
-      out.push(line);
-      continue;
-    }
-    let s = line;
-    s = s.replace(/`([^`]+)`/g, "$1");
-    s = s.replace(/\*\*([^*]+)\*\*/g, "$1");
-    s = s.replace(/_([^_]+)_/g, "$1");
-    if (s.startsWith("# ")) s = s.slice(2);
-    else if (s.startsWith("## ")) s = s.slice(3);
-    else if (s.startsWith("### ")) s = s.slice(4);
-    else if (s.startsWith("> ")) s = s.slice(2);
-    out.push(s);
-  }
-  return out.join("\n");
 }
 
 export interface RenderOptions extends EmitOptions {
