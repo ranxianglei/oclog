@@ -1,0 +1,40 @@
+{
+  "name": "oclog",
+  "version": "0.1.0",
+  "description": "OpenCode session log viewer — tail, follow, and export session logs",
+  "type": "module",
+  "main": "dist/cli.js",
+  "bin": {
+    "oclog": "dist/cli.js"
+  },
+  "scripts": {
+    "dev": "tsx src/cli.ts",
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "opencode",
+    "log-viewer",
+    "tail",
+    "cli",
+    "session",
+    "terminal"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsup": "^8.0.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}
