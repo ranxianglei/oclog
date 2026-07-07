@@ -1,11 +1,14 @@
 {
-  "name": "oclog",
+  "name": "@ranxianglei/oclog",
   "version": "0.1.0",
   "description": "OpenCode session log viewer — tail, follow, and export session logs",
   "type": "module",
   "main": "dist/cli.js",
   "bin": {
     "oclog": "dist/cli.js"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "dev": "tsx src/cli.ts",
@@ -24,6 +27,20 @@
     "terminal"
   ],
   "license": "MIT",
+  "author": "ranxianglei",
+  "homepage": "https://github.com/ranxianglei/oclog#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ranxianglei/oclog.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ranxianglei/oclog/issues"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": ">=18"
   },
