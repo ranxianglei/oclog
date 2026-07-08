@@ -5,11 +5,12 @@ import process from "node:process";
 
 import {
   exportSession,
+  followLatest,
   followSession,
   listSessions,
   resolveTarget,
 } from "./oclog.js";
-import { OclogError } from "./errors.js";
+import { AmbiguousTarget, OclogError, SessionNotFound } from "./errors.js";
 import {
   renderError,
   renderExport,
@@ -17,21 +18,21 @@ import {
   renderSessionList,
   renderTail,
 } from "./output.js";
-import { renderMessageBlock } from "./format.js";
-import type { CliOptions } from "./types.js";
+import { renderMessageBlock, renderSessionHeader } from "./format.js";
+import type { CliOptions, ExportPayload } from "./types.js";
 
-const VERSION = "0.1.3";
+const VERSION = "0.1.4";
 
 const HELP = `Usage: oclog [options] [session-id|keyword]
 
 Options:
   -f, --follow          Follow the session (poll for new messages)
   -a, --all             Show all messages (no tail limit)
-  -n, --tail <n>        Show last N messages (default: 10)
+  -n, --num <n>         Number of sessions to list, or messages to tail (default: 10)
   -o, --output <file>   Write markdown to file
   -j, --json            Output export as JSON
       --raw             Output raw markdown (no ANSI rendering)
-      --expand          Expand truncated content + show reasoning
+  -e, --expand, --full  Expand truncated content + show full reasoning
       --pager           Pipe through pager (less)
       --interval <sec>  Follow interval in seconds (default: 2)
   -h, --help            Show this help
@@ -53,22 +54,18 @@ function parseArgs(argv: string[]): { target?: string; opts: CliOptions } {
       case "-f": case "--follow": opts.follow = true; break;
       case "-a": case "--all": opts.all = true; break;
       case "--raw": opts.raw = true; break;
-      case "--expand": opts.expand = true; break;
+      case "-e": case "--expand": case "--full": opts.expand = true; break;
       case "--pager": opts.pager = true; break;
       case "-j": case "--json": opts.json = true; break;
       case "-h": case "--help": process.stdout.write(HELP); process.exit(0);
       case "-v": case "--version": process.stdout.write(VERSION + "\n"); process.exit(0);
-      case "-n": case "--tail": opts.tail = parseInt(argv[++i] ?? "10", 10); break;
+      case "-n": case "--num": case "--tail": opts.tail = parseInt(argv[++i] ?? "10", 10); break;
       case "-o": case "--output": opts.output = argv[++i]; break;
       case "--interval": opts.interval = parseFloat(argv[++i] ?? "2"); break;
       default:
-        if (arg.startsWith("--")) {
-          const eq = arg.indexOf("=");
-          if (eq > 0) {
-            (opts as Record<string, unknown>)[arg.slice(2, eq)] = arg.slice(eq + 1);
-          } else {
-            (opts as Record<string, unknown>)[arg.slice(2)] = true;
-          }
+        if (arg.startsWith("--") && arg.length > 2) {
+          process.stderr.write(`Unknown option: ${arg}\n\n${HELP}`);
+          process.exit(2);
         } else if (arg.startsWith("-") && arg.length > 1) {
           process.stderr.write(`Unknown option: ${arg}\n\n${HELP}`);
           process.exit(2);
@@ -81,47 +78,78 @@ function parseArgs(argv: string[]): { target?: string; opts: CliOptions } {
   return { target: positional[0], opts };
 }
 
+function validateConflicts(opts: CliOptions): void {
+  if (opts.follow && opts.output) {
+    process.stderr.write("error: -f/--follow cannot be combined with -o/--output\n");
+    process.exit(2);
+  }
+  if (opts.follow && opts.json) {
+    process.stderr.write("error: -f/--follow cannot be combined with -j/--json\n");
+    process.exit(2);
+  }
+  if (opts.all && opts.output) {
+    process.stderr.write("error: --all cannot be combined with -o/--output (export is always full)\n");
+    process.exit(2);
+  }
+}
+
 async function main(): Promise<void> {
   const { target, opts } = parseArgs(process.argv.slice(2));
+  validateConflicts(opts);
+
+  const num = opts.tail ?? 10;
 
   if (!target) {
-    const sessions = await listSessions({ limit: 10 });
     if (opts.follow) {
-      const latest = sessions[0];
-      if (!latest) {
-        renderError("No sessions found to follow.");
-        return;
-      }
-      await doFollow(latest.id, opts);
-    } else {
-      renderSessionList(sessions, opts);
+      await doFollowLatest(opts);
+      return;
     }
+    const sessions = await listSessions({ limit: num });
+    if (!sessions.length) {
+      process.stderr.write("No sessions found.\n");
+      process.exit(1);
+    }
+    renderSessionList(sessions, opts);
     return;
   }
 
-  const sessions = await listSessions({ limit: 20 });
+  const sessions = await listSessions({ limit: 100 });
   let sessionId: string;
   try {
     sessionId = resolveTarget(target, sessions);
-  } catch {
-    sessionId = target;
+  } catch (err) {
+    if (err instanceof AmbiguousTarget) {
+      const matches = sessions.filter(
+        (s) =>
+          s.id.startsWith(target) ||
+          s.id.includes(target) ||
+          (s.title ?? "").toLowerCase().includes(target.toLowerCase()),
+      );
+      process.stderr.write(`Multiple sessions match '${target}':\n\n`);
+      renderSessionList(matches, opts);
+      return;
+    }
+    if (err instanceof SessionNotFound) {
+      process.stderr.write(`No session found matching '${target}'.\n`);
+      process.stderr.write("Run 'oclog' to see recent sessions.\n");
+      process.exit(1);
+    }
+    throw err;
+  }
+
+  if (opts.follow) {
+    await doFollow(sessionId, opts, num);
+    return;
   }
 
   const data = await exportSession(sessionId);
   if (!data) {
-    renderError(
-      `Session \`${sessionId}\` not found or empty.`,
-      "Run `oclog` with no args to list available sessions.",
-    );
-    return;
+    process.stderr.write(`Failed to export session ${sessionId}.\n`);
+    process.exit(1);
   }
 
   if (opts.output) {
-    const content = opts.json
-      ? JSON.stringify(data, null, 2)
-      : data.messages.map((m) => renderMessageBlock(m, { expand: true }).join("\n")).join("\n\n");
-    writeFileSync(opts.output, content + "\n", "utf8");
-    process.stderr.write(`Wrote ${opts.output}\n`);
+    writeExportFile(data, opts);
     return;
   }
 
@@ -130,29 +158,65 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (opts.follow) {
-    await doFollow(sessionId, opts);
-    return;
-  }
-
   if (opts.all) {
     renderExport(data, opts);
   } else {
-    renderTail(data, opts.tail ?? 10, opts);
+    renderTail(data, num, opts);
   }
 }
 
-async function doFollow(sessionId: string, opts: CliOptions): Promise<void> {
+function writeExportFile(
+  data: ExportPayload,
+  opts: CliOptions,
+): void {
+  if (opts.json) {
+    writeFileSync(opts.output!, JSON.stringify(data, null, 2) + "\n", "utf8");
+  } else {
+    const parts = [...renderSessionHeader(data.info), ""];
+    for (const msg of data.messages) {
+      parts.push(...renderMessageBlock(msg, { expand: opts.expand }));
+      parts.push("");
+    }
+    writeFileSync(opts.output!, parts.join("\n") + "\n", "utf8");
+  }
+  process.stdout.write(`Written to ${opts.output}\n`);
+}
+
+function setupSigintHandler(): void {
+  process.on("SIGINT", () => {
+    process.stderr.write("\n(stopped)\n");
+    process.exit(0);
+  });
+}
+
+async function doFollow(
+  sessionId: string,
+  opts: CliOptions,
+  num: number,
+): Promise<void> {
+  setupSigintHandler();
+  const initial = opts.all ? null : num;
   await followSession(sessionId, {
     interval: (opts.interval ?? 2) * 1000,
-    initial: opts.tail ?? 10,
+    initial,
+    onMessage: (msg) => renderMessageStream(msg, opts),
+  });
+}
+
+async function doFollowLatest(opts: CliOptions): Promise<void> {
+  setupSigintHandler();
+  const initial = opts.all ? null : (opts.tail ?? 10);
+  await followLatest({
+    interval: (opts.interval ?? 2) * 1000,
+    initial,
     onMessage: (msg) => renderMessageStream(msg, opts),
   });
 }
 
 main().catch((err: unknown) => {
   if (err instanceof OclogError) {
-    renderError(err.message, err.hint);
+    process.stderr.write(`${err.message}\n`);
+    if (err.hint) process.stderr.write(`💡 ${err.hint}\n`);
     process.exit(1);
   }
   const msg = err instanceof Error ? err.message : String(err);

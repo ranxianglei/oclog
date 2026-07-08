@@ -238,7 +238,7 @@ describe("renderMessageBlock", () => {
     expect(lines.some((l) => l.includes("I can see the files"))).toBe(true);
   });
 
-  it("hides reasoning when expand is false", () => {
+  it("shows reasoning preview when expand is false", () => {
     const lines = renderMessageBlock(
       {
         info: { role: "assistant" },
@@ -249,7 +249,8 @@ describe("renderMessageBlock", () => {
       },
       { expand: false },
     );
-    expect(lines.some((l) => l.includes("secret thought"))).toBe(false);
+    expect(lines.some((l) => l.includes("secret thought"))).toBe(true);
+    expect(lines.some((l) => l.includes("Reasoning"))).toBe(true);
     expect(lines).toContain("public answer");
   });
 

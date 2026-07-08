@@ -1,11 +1,11 @@
 {
   "name": "@ranxianglei/oclog",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "OpenCode session log viewer — tail, follow, and export session logs",
   "type": "module",
-  "main": "dist/cli.js",
+  "main": "dist/cli.mjs",
   "bin": {
-    "oclog": "dist/cli.js"
+    "oclog": "dist/cli.mjs"
   },
   "publishConfig": {
     "access": "public"

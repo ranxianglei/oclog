@@ -107,15 +107,19 @@ export function truncate(
   return `${text.slice(0, half)}\n\n… [truncated ${omitted} chars]\n\n${text.slice(-half)}`;
 }
 
-function messageHasText(msg: RawMessage): boolean {
+export function messageHasContent(msg: RawMessage): boolean {
   const parts = msg.parts;
   if (!parts || parts.length === 0) return false;
   return parts.some((p) => {
     if (p.type === "text") return (p.text?.trim().length ?? 0) > 0;
-    if (p.type === "tool") return p.state?.output != null || p.state?.input != null;
+    if (p.type === "tool") return Boolean(p.tool);
     if (p.type === "reasoning") return (p.text?.trim().length ?? 0) > 0;
     return false;
   });
+}
+
+function messageHasText(msg: RawMessage): boolean {
+  return messageHasContent(msg);
 }
 
 function renderTodoList(todos: unknown): string[] {
@@ -307,13 +311,21 @@ export function renderMessageBlock(
   if (role === "assistant") {
     for (const part of parts) {
       if (part.type === "reasoning" && part.text) {
+        const reasoningLines = part.text.split("\n");
         if (opts.expand) {
           lines.push("> 💭 **Reasoning:**");
-          for (const ln of part.text.split("\n")) {
+          for (const ln of reasoningLines) {
             lines.push(`> ${ln}`);
           }
-          lines.push("");
+        } else {
+          const preview = reasoningLines[0]?.trim() ?? "";
+          const hidden = reasoningLines.length;
+          if (preview) {
+            lines.push(`> 💭 *Reasoning (${hidden} line${hidden > 1 ? "s" : ""}, hidden — use --expand to show):*`);
+            lines.push(`> ${preview.slice(0, 120)}${preview.length > 120 ? "…" : ""}`);
+          }
         }
+        lines.push("");
       } else if (part.type === "text" && part.text) {
         lines.push(part.text);
       } else if (part.type === "tool") {

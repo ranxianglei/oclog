@@ -11,4 +11,5 @@ export default defineConfig({
   dts: true,
   shims: false,
   splitting: false,
+  outExtension: () => ({ js: ".mjs" }),
 });

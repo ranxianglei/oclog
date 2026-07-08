@@ -110,7 +110,8 @@ export function renderTail(
   opts: RenderOptions = {},
 ): void {
   const visible = filterVisible(data.messages);
-  const tail = n ? visible.slice(Math.max(0, visible.length - n)) : visible;
+  const count = n == null || n < 0 ? 10 : n;
+  const tail = count === 0 ? [] : visible.slice(Math.max(0, visible.length - count));
   const parts: string[] = [];
   for (const msg of tail) {
     parts.push(...renderMessageBlock(msg, opts));
@@ -131,5 +132,5 @@ export function renderMessageStream(
 export function renderError(message: string, hint?: string): void {
   const lines = [`## ✗ ${chalk.red("Error")}`, "", message];
   if (hint) lines.push("", `💡 ${hint}`);
-  emit(lines.join("\n"), { raw: false });
+  process.stderr.write(lines.join("\n") + "\n");
 }
