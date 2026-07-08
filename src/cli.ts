@@ -21,7 +21,7 @@ import {
 import { renderMessageBlock, renderSessionHeader } from "./format.js";
 import type { CliOptions, ExportPayload } from "./types.js";
 
-const VERSION = "0.1.4";
+const VERSION = "0.1.5";
 
 const HELP = `Usage: oclog [options] [session-id|keyword]
 
@@ -130,11 +130,16 @@ async function main(): Promise<void> {
       return;
     }
     if (err instanceof SessionNotFound) {
-      process.stderr.write(`No session found matching '${target}'.\n`);
-      process.stderr.write("Run 'oclog' to see recent sessions.\n");
-      process.exit(1);
+      if (/^ses_[A-Za-z0-9]{10,}$/.test(target)) {
+        sessionId = target;
+      } else {
+        process.stderr.write(`No session found matching '${target}'.\n`);
+        process.stderr.write("Run 'oclog' to see recent sessions.\n");
+        process.exit(1);
+      }
+    } else {
+      throw err;
     }
-    throw err;
   }
 
   if (opts.follow) {

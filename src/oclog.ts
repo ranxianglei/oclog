@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readFileSync, unlinkSync, openSync } from "node:fs";
+import { readFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -28,76 +28,49 @@ export interface FollowOptions {
   onMessage: (msg: RawMessage, allMessages: RawMessage[]) => void | Promise<void>;
 }
 
-interface BunSpawnResult {
-  exited: Promise<number>;
-  stderr: ReadableStream<Uint8Array> | null;
-}
-
-interface BunGlobal {
-  spawn: (opts: {
-    cmd: string[];
-    cwd?: string;
-    stdout: unknown;
-    stderr: string;
-    env: Record<string, string | undefined>;
-  }) => BunSpawnResult;
-}
-
-function getBun(): BunGlobal | null {
-  const bun = (globalThis as { Bun?: BunGlobal }).Bun;
-  return bun ?? null;
-}
-
+/**
+ * Run `opencode` with given args and capture stdout as a string.
+ *
+ * Uses shell redirect to a temp file instead of pipe capture. This bypasses
+ * Bun's pipe truncation bug (cuts off at ~200KB) and works reliably for
+ * large exports (>1MB). The CWD is set to tmpdir() to avoid interference
+ * from node_modules/ in the project directory (Bun child_process bug).
+ */
 async function runOpencode(args: string[]): Promise<string> {
   const env = { ...process.env, NO_COLOR: "1" };
-  const bun = getBun();
-  const neutralCwd = tmpdir();
+  const cwd = tmpdir();
+  const tmpFile = join(cwd, `oclog-${randomUUID()}.json`);
 
-  if (bun) {
-    const tmpFile = join(tmpdir(), `oclog-${randomUUID()}.json`);
-    const fd = openSync(tmpFile, "w");
-    const child = bun.spawn({
-      cmd: ["opencode", ...args],
-      cwd: neutralCwd,
-      stdout: fd,
-      stderr: "pipe",
-      env,
-    });
-    const stderrText = child.stderr
-      ? await new Response(child.stderr).text()
-      : "";
-    const code = await child.exited;
-    if (code !== 0) {
-      try { unlinkSync(tmpFile); } catch {}
-      throw new OclogError(`opencode ${args.join(" ")} failed`, stderrText);
-    }
-    try {
-      return readFileSync(tmpFile, "utf8");
-    } finally {
-      try { unlinkSync(tmpFile); } catch {}
-    }
-  }
+  // Safely escape each arg for shell single-quotes
+  const escapedArgs = args.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ");
+  const shellCmd = `opencode ${escapedArgs} > '${tmpFile}' 2>/dev/null`;
 
   return new Promise((resolve, reject) => {
-    const child = spawn("opencode", args, {
-      stdio: ["ignore", "pipe", "pipe"],
-      cwd: neutralCwd,
+    const child = spawn("sh", ["-c", shellCmd], {
+      cwd,
       env,
+      stdio: ["ignore", "pipe", "pipe"],
     });
-    const chunks: Buffer[] = [];
     let stderr = "";
-    child.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
     child.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
     child.on("error", (err: NodeJS.ErrnoException) => {
+      try { unlinkSync(tmpFile); } catch {}
       if (err.code === "ENOENT") reject(new OpencodeUnavailable());
       else reject(err);
     });
     child.on("close", (code: number) => {
       if (code !== 0) {
+        try { unlinkSync(tmpFile); } catch {}
         reject(new OclogError(`opencode ${args.join(" ")} failed`, stderr));
         return;
       }
-      resolve(Buffer.concat(chunks).toString("utf8"));
+      try {
+        resolve(readFileSync(tmpFile, "utf8"));
+      } catch (err) {
+        reject(err);
+      } finally {
+        try { unlinkSync(tmpFile); } catch {}
+      }
     });
   });
 }

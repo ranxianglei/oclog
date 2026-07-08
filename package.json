@@ -1,6 +1,6 @@
 {
   "name": "@ranxianglei/oclog",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "OpenCode session log viewer — tail, follow, and export session logs",
   "type": "module",
   "main": "dist/cli.mjs",
