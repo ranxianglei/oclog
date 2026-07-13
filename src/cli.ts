@@ -21,7 +21,7 @@ import {
 import { renderMessageBlock, renderSessionHeader } from "./format.js";
 import type { CliOptions, ExportPayload } from "./types.js";
 
-const VERSION = "0.1.8";
+const VERSION = "0.1.9";
 
 const HELP = `Usage: oclog [options] [session-id|keyword]
 

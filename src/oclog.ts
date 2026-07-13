@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { homedir, platform, tmpdir } from "node:os";
@@ -103,23 +103,30 @@ function listSessionsFromDb(limit: number): SessionListItem[] | null {
   const dbPath = findOpencodeDb();
   if (!dbPath) return null;
 
-  let Database: typeof import("better-sqlite3");
-  try {
-    Database = require("better-sqlite3");
-  } catch {
-    return null;
-  }
+  const sql =
+    "SELECT id, title, directory, time_created as created, time_updated as updated, project_id as projectId FROM session ORDER BY time_updated DESC LIMIT ?";
 
   try {
+    const Database = require("better-sqlite3");
     const db = new Database(dbPath, { readonly: true, fileMustExist: true });
-    const rows = db.prepare(
-      "SELECT id, title, directory, time_created as created, time_updated as updated, project_id as projectId FROM session ORDER BY time_updated DESC LIMIT ?",
-    ).all(limit) as SessionListItem[];
+    const rows = db.prepare(sql).all(limit) as SessionListItem[];
     db.close();
     return rows;
-  } catch {
-    return null;
+  } catch {}
+
+  const cliSql = sql.replace("?", String(limit));
+  const r = spawnSync("sqlite3", ["-json", dbPath, cliSql], {
+    encoding: "utf8",
+    timeout: 5000,
+  });
+  if (r.status === 0 && r.stdout?.trim()) {
+    try {
+      const parsed = JSON.parse(r.stdout) as SessionListItem[];
+      if (Array.isArray(parsed)) return parsed;
+    } catch {}
   }
+
+  return null;
 }
 
 export async function listSessions(
