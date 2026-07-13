@@ -1,6 +1,6 @@
-import { spawn } from "node:child_process";
-import { readFileSync, unlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { homedir, platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -76,10 +76,54 @@ async function runOpencode(args: string[]): Promise<string> {
   });
 }
 
+function findOpencodeDb(): string | null {
+  const db = "opencode.db";
+  const home = homedir();
+  const candidates: string[] = [];
+
+  switch (platform()) {
+    case "darwin":
+      candidates.push(join(home, "Library", "Application Support", "opencode", db));
+      break;
+    case "win32":
+      if (process.env.APPDATA) candidates.push(join(process.env.APPDATA, "opencode", db));
+      break;
+    default:
+      if (process.env.XDG_DATA_HOME) candidates.push(join(process.env.XDG_DATA_HOME, "opencode", db));
+      candidates.push(join(home, ".local", "share", "opencode", db));
+  }
+
+  return candidates.find((p) => existsSync(p)) ?? null;
+}
+
+function listSessionsFromDb(limit: number): SessionListItem[] | null {
+  const dbPath = findOpencodeDb();
+  if (!dbPath) return null;
+
+  const sql = `SELECT id, title, directory, time_created as created, time_updated as updated, project_id as projectId FROM session ORDER BY time_updated DESC LIMIT ${limit};`;
+  const r = spawnSync("sqlite3", ["-json", dbPath, sql], {
+    encoding: "utf8",
+    timeout: 5000,
+  });
+
+  if (r.status !== 0 || !r.stdout?.trim()) return null;
+
+  try {
+    const parsed = JSON.parse(r.stdout) as SessionListItem[];
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function listSessions(
   opts: ListOptions = {},
 ): Promise<SessionListItem[]> {
   const limit = opts.limit ?? DEFAULT_LIMIT;
+
+  const fromDb = listSessionsFromDb(limit);
+  if (fromDb) return fromDb;
+
   const raw = await runOpencode([
     "session", "list", "-n", String(limit), "--format", "json",
   ]);
