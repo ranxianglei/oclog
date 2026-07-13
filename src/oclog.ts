@@ -1,8 +1,11 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { homedir, platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+
+const require = createRequire(import.meta.url);
 
 import type { ExportPayload, RawMessage, SessionListItem } from "./types.js";
 import {
@@ -100,17 +103,20 @@ function listSessionsFromDb(limit: number): SessionListItem[] | null {
   const dbPath = findOpencodeDb();
   if (!dbPath) return null;
 
-  const sql = `SELECT id, title, directory, time_created as created, time_updated as updated, project_id as projectId FROM session ORDER BY time_updated DESC LIMIT ${limit};`;
-  const r = spawnSync("sqlite3", ["-json", dbPath, sql], {
-    encoding: "utf8",
-    timeout: 5000,
-  });
-
-  if (r.status !== 0 || !r.stdout?.trim()) return null;
+  let Database: typeof import("better-sqlite3");
+  try {
+    Database = require("better-sqlite3");
+  } catch {
+    return null;
+  }
 
   try {
-    const parsed = JSON.parse(r.stdout) as SessionListItem[];
-    return Array.isArray(parsed) ? parsed : null;
+    const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    const rows = db.prepare(
+      "SELECT id, title, directory, time_created as created, time_updated as updated, project_id as projectId FROM session ORDER BY time_updated DESC LIMIT ?",
+    ).all(limit) as SessionListItem[];
+    db.close();
+    return rows;
   } catch {
     return null;
   }

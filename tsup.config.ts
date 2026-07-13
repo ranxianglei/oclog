@@ -11,5 +11,6 @@ export default defineConfig({
   dts: true,
   shims: false,
   splitting: false,
+  external: ["better-sqlite3"],
   outExtension: () => ({ js: ".mjs" }),
 });
