@@ -33,21 +33,22 @@ export interface FollowOptions {
  *
  * Uses shell redirect to a temp file instead of pipe capture. This bypasses
  * Bun's pipe truncation bug (cuts off at ~200KB) and works reliably for
- * large exports (>1MB). The CWD is set to tmpdir() to avoid interference
- * from node_modules/ in the project directory (Bun child_process bug).
+ * large exports (>1MB). The spawn CWD is tmpdir() to avoid Bun's
+ * child_process node_modules interference bug, but opencode itself runs
+ * from process.cwd() via `cd` so it sees project-local sessions.
  */
 async function runOpencode(args: string[]): Promise<string> {
   const env = { ...process.env, NO_COLOR: "1" };
-  const cwd = tmpdir();
-  const tmpFile = join(cwd, `oclog-${randomUUID()}.json`);
+  const spawnCwd = tmpdir();
+  const tmpFile = join(spawnCwd, `oclog-${randomUUID()}.json`);
 
-  // Safely escape each arg for shell single-quotes
+  const escapedCwd = process.cwd().replace(/'/g, "'\\''");
   const escapedArgs = args.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ");
-  const shellCmd = `opencode ${escapedArgs} > '${tmpFile}' 2>/dev/null`;
+  const shellCmd = `cd '${escapedCwd}' && opencode ${escapedArgs} > '${tmpFile}' 2>/dev/null`;
 
   return new Promise((resolve, reject) => {
     const child = spawn("sh", ["-c", shellCmd], {
-      cwd,
+      cwd: spawnCwd,
       env,
       stdio: ["ignore", "pipe", "pipe"],
     });
